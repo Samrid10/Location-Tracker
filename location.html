@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GPS Geolocation Tracker (Consent Required)</title>
+  <style>
+    :root{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}
+    body{margin:0;background:#0f172a;color:#e6eef8;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));border-radius:12px;padding:20px;max-width:720px;width:100%;box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+    h1{margin:0 0 8px;font-size:20px}
+    p.lead{margin:0 0 16px;color:#bcd3f5}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+    button{background:#2563eb;border:0;color:white;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    pre{background:#071024;padding:12px;border-radius:8px;overflow:auto}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    label{font-size:13px;color:#9fb6e9}
+    small{color:#9fb6e9}
+    .map-link{display:inline-block;margin-top:8px}
+    .status{padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);color:#9fb6e9;margin-bottom:10px}
+    footer{margin-top:14px;color:#7f9ed9;font-size:13px}
+    @media(max-width:640px){.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>GPS Geolocation Tracker</h1>
+    <p class="lead">This page uses the browser Geolocation API. It will prompt the user for permission and — only if consent is given — provide accurate latitude &amp; longitude (if available).</p>
+
+    <div class="controls">
+      <button id="getBtn">Get current location</button>
+      <button id="watchBtn" class="ghost">Start watch</button>
+      <button id="stopWatchBtn" class="ghost" disabled>Stop watch</button>
+      <button id="copyBtn" class="ghost" disabled>Copy coords</button>
+      <button id="clearBtn" class="ghost">Clear</button>
+    </div>
+
+    <div class="status" id="status">Status: Idle</div>
+
+    <div class="row">
+      <div>
+        <label>Coordinates</label>
+        <pre id="coords">Lat: —\nLon: —\nAccuracy: —</pre>
+        <a id="mapLink" class="map-link" target="_blank" rel="noopener">Open in Google Maps</a>
+      </div>
+      <div>
+        <label>Raw position object (JSON)</label>
+        <pre id="raw">{}</pre>
+      </div>
+    </div>
+
+    <footer>
+      Note: Geolocation works only on secure contexts (HTTPS) or on <code>localhost</code>. If you test locally, run a simple server (for example: <code>python -m http.server</code>) and open <code>http://localhost:8000</code>. The browser will ask for permission before sharing location.
+    </footer>
+  </div>
+
+<script>
+// Basic GPS geolocation tracker script
+const getBtn = document.getElementById('getBtn');
+const watchBtn = document.getElementById('watchBtn');
+const stopWatchBtn = document.getElementById('stopWatchBtn');
+const copyBtn = document.getElementById('copyBtn');
+const clearBtn = document.getElementById('clearBtn');
+const statusEl = document.getElementById('status');
+const coordsEl = document.getElementById('coords');
+const rawEl = document.getElementById('raw');
+const mapLink = document.getElementById('mapLink');
+
+let watchId = null;
+let lastPosition = null;
+
+function setStatus(text) { statusEl.textContent = 'Status: ' + text; }
+
+function showPosition(position) {
+  const { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed } = position.coords;
+  lastPosition = { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed, timestamp: position.timestamp };
+  coordsEl.textContent = `Lat: ${latitude}\nLon: ${longitude}\nAccuracy: ${accuracy} meters`;
+  rawEl.textContent = JSON.stringify(position, null, 2);
+  mapLink.href = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+  mapLink.textContent = 'Open in Google Maps';
+  copyBtn.disabled = false;
+}
+
+function handleError(err) {
+  console.error('Geolocation error', err);
+  switch(err.code) {
+    case err.PERMISSION_DENIED: setStatus('Permission denied'); break;
+    case err.POSITION_UNAVAILABLE: setStatus('Position unavailable'); break;
+    case err.TIMEOUT: setStatus('Timed out'); break;
+    default: setStatus('Error: ' + (err.message || err));
+  }
+}
+
+getBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    setStatus('Geolocation not supported in this browser');
+    return;
+  }
+  setStatus('Requesting current position...');
+  navigator.geolocation.getCurrentPosition(pos => {
+    setStatus('Got position');
+    showPosition(pos);
+  }, err => {
+    handleError(err);
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+});
+
+watchBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) { setStatus('Geolocation not supported'); return; }
+  if (watchId !== null) { setStatus('Already watching'); return; }
+  setStatus('Starting watchPosition...');
+  watchId = navigator.geolocation.watchPosition(pos => {
+    setStatus('Watching — received update');
+    showPosition(pos);
+    stopWatchBtn.disabled = false;
+    watchBtn.disabled = true;
+  }, err => {
+    handleError(err);
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 });
+});
+
+stopWatchBtn.addEventListener('click', () => {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    setStatus('Watch stopped');
+    stopWatchBtn.disabled = true;
+    watchBtn.disabled = false;
+  }
+});
+
+copyBtn.addEventListener('click', async () => {
+  if (!lastPosition) return;
+  const text = `${lastPosition.latitude},${lastPosition.longitude}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus('Copied coords to clipboard');
+  } catch (e) {
+    setStatus('Copy failed — maybe insecure context');
+  }
+});
+
+clearBtn.addEventListener('click', () => {
+  coordsEl.textContent = 'Lat: —\nLon: —\nAccuracy: —';
+  rawEl.textContent = '{}';
+  mapLink.href = '#';
+  mapLink.textContent = '';
+  copyBtn.disabled = true;
+  setStatus('Cleared');
+});
+
+// initialize
+setStatus('Idle');
+mapLink.href = '#';
+</script>
+</body>
+</html>
